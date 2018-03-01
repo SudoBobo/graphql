@@ -682,9 +682,12 @@ local function select_internal(self, collection_name, from, filter, args, extra)
     -- search for suitable index
     local full_match, index_name, index_value, pivot = get_index_name(
         self, collection_name, from, filter, args)
+    local index
+    if index_name ~= nil then
     assert(self.funcs.is_collection_exists(collection_name),
         ('cannot find collection "%s"'):format(collection_name))
-    local index = self.funcs.get_index(collection_name, index_name)
+        index = self.funcs.get_index(collection_name, index_name)
+    end
     if from ~= nil then
         -- allow fullscan only for a top-level object
         assert(index ~= nil,
