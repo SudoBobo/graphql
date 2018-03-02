@@ -127,7 +127,7 @@ local function convert_scalar_type(avro_schema, opts)
 end
 
 --- Non-recursive version of the @{gql_type} function that returns
---- InputObject instead of Object.
+--- InputObject (instead of Object) or a scalar type.
 ---
 --- An error will be raised if avro_schema type is 'record'
 --- and its' fields have non-scalar types. So triple nesting level is not

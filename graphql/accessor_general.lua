@@ -913,6 +913,8 @@ function accessor_general.new(opts, funcs)
             fetched_object_cnt_max = fetched_object_cnt_max
         }
     }, {
+        -- 'filter' param are typical GraphQL args
+        -- 'args' param are list args
         __index = {
             select = function(self, parent, collection_name, from,
                     filter, args, extra)
