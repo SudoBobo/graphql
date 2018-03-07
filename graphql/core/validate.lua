@@ -15,12 +15,30 @@ local function getParentField(context, name, count)
     parent = parent.ofType
   end
 
+  if parent.fields == nil then
+    print('print from getParentField - 18 - parent')
+    print('trying to get ' .. name)
+    require('pl.pretty').dump(parent)
+
+  --  --@todo find in what ... on where are
+  end
+  --
+
+  --if parent.fields == nil and parent.__type == 'Union' and parent.types  ~= nil
+  --  then
+  --
+  --end
+
   return parent.fields[name]
 end
 
 local visitors = {
   document = {
     enter = function(node, context)
+
+      print('enter is called with')
+      require('pl.pretty').dump(node)
+
       for _, definition in ipairs(node.definitions) do
         if definition.kind == 'fragmentDefinition' then
           context.fragmentMap[definition.name.value] = definition
@@ -282,6 +300,9 @@ return function(schema, tree)
   }
 
   local function visit(node)
+
+    print('visit called with following node -')
+    require('pl.pretty').dump(node)
     local visitor = node.kind and visitors[node.kind]
 
     if not visitor then return end
