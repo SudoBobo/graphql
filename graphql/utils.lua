@@ -13,6 +13,8 @@ function utils.show_trace(func, ...)
         function(err)
             log.info('ERROR: ' .. tostring(err))
             log.info(debug.traceback())
+            print('ERROR: ' .. tostring(err))
+            print(debug.traceback())
         end
     ))
 end
@@ -130,6 +132,14 @@ function utils.gen_booking_table(data)
             return rawpairs(data)
         end,
     })
+end
+
+function utils.get_keys(t)
+    local keys = {}
+    for k, _ in pairs(t) do
+        keys[#keys + 1] = k
+    end
+    return keys
 end
 
 return utils
