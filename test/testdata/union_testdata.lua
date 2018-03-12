@@ -259,21 +259,21 @@ function union_testdata.run_queries(gql_wrapper)
     local query = [[
         query obtainHeroes($hero_id: String) {
             hero_collection(hero_id: $hero_id) {
+                hero_id
+                hero_type
                 hero_connection {
+
                     ... on human_collection {
-                        hero_id
                         name
                     }
+
                     ... on starship_collection {
-                        hero_id
-
+                        model
                     }
-
                 }
             }
         }
     ]]
-
 
     utils.show_trace(function()
         local variables_1 = {hero_id = 'hero_id_1'}

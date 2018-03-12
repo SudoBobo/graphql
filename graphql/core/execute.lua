@@ -163,11 +163,12 @@ local function completeValue(fieldType, result, subSelections, context)
     local completedResult = completeValue(innerType, result, subSelections, context)
 
     if completedResult == nil then
-      print('print from completeValue')
-      print('result')
-      require('pl.pretty').dump(result)
-      print('fieldType')
-      require('pl.pretty').dump(fieldType)
+        --@todo remove comments
+      --print('print from completeValue')
+      --print('result')
+      --require('pl.pretty').dump(result)
+      --print('fieldType')
+      --require('pl.pretty').dump(fieldType)
 
       error('No value provided for non-null ' .. (innerType.name or innerType.__type))
     end
@@ -188,12 +189,13 @@ local function completeValue(fieldType, result, subSelections, context)
 
     local values = {}
     for i, value in ipairs(result) do
-      print('print for ipairs(result) 195')
-      require('pl.pretty').dump(result)
-      print('value')
-      require('pl.pretty').dump(value)
-      print('subSelections')
-      require('pl.pretty').dump(subSelections)
+        --@todo remove comments
+      --print('print for ipairs(result) 195')
+      --require('pl.pretty').dump(result)
+      --print('value')
+      --require('pl.pretty').dump(value)
+      --print('subSelections')
+      --require('pl.pretty').dump(subSelections)
 
 
       values[i] = completeValue(innerType, value, subSelections, context)
@@ -263,13 +265,14 @@ end
 
 evaluateSelections = function(objectType, object, selections, context)
 
-  print('EVALUETE SELECTIONS')
-  --print('objectType')
-  --require('pl.pretty').dump(objectType)
-  print('object')
-  require('pl.pretty').dump(object)
-
-  print('EVALUETE SELECTIONS CLOSE')
+  --@todo remove debug
+  --print('EVALUETE SELECTIONS')
+  ----print('objectType')
+  ----require('pl.pretty').dump(objectType)
+  --print('object')
+  --require('pl.pretty').dump(object)
+  --
+  --print('EVALUETE SELECTIONS CLOSE')
 
   local groupedFieldSet = collectFields(objectType, selections, {}, {}, context)
 

@@ -35,10 +35,6 @@ end
 local visitors = {
   document = {
     enter = function(node, context)
-
-      print('enter is called with')
-      require('pl.pretty').dump(node)
-
       for _, definition in ipairs(node.definitions) do
         if definition.kind == 'fragmentDefinition' then
           context.fragmentMap[definition.name.value] = definition
@@ -300,9 +296,6 @@ return function(schema, tree)
   }
 
   local function visit(node)
-
-    print('visit called with following node -')
-    require('pl.pretty').dump(node)
     local visitor = node.kind and visitors[node.kind]
 
     if not visitor then return end

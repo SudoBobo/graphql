@@ -8,6 +8,7 @@
 ---   passed to an accessor function in the filter argument.
 
 local json = require('json')
+local yaml = require('yaml')
 
 local parse = require('graphql.core.parse')
 local schema = require('graphql.core.schema')
@@ -250,11 +251,11 @@ local function convert_record_fields(state, fields)
     return res
 end
 
---@todo where to put format description?
+--@todo where to put new format description?
 
 --- The function converts passed simple connection to a field of GraphQL type
 --- There are two types on connections: simple and union
----
+
 ---
 --- @tparam table state for read state.accessor and previously filled
 --- state.types (state.types are gql types)
@@ -291,6 +292,9 @@ local convert_simple_connection = function(state, c, collection_name)
         kind = destination_type,
         arguments = c_args,
         resolve = function(parent, args_instance, info)
+            --print('print from 295 - resolve of simple connection')
+            --print('parent - resolve result from parent type')
+            --require('pl.pretty').dump(parent)
             local destination_args_names = {}
             local destination_args_values = {}
 
@@ -352,14 +356,14 @@ end
 
 local convert_union_connection = function(state, c, collection_name)
     local union_types = {}
-    --local union_arguments = {}
-    --local union_list_arguments = {}
+    local collection_to_arguments = {}
+    local collection_to_list_arguments = {}
     -- map from determinant objects to use in resolveType
     -- not to use like determinant[determinant_value] = ...
     -- use like for k, v in pairs() ...
     -- {{hero_type = 'human', number_of_legs = '2'} = 'human_collection', {
     local determinant_keys = utils.get_keys(c.variants[1].determinant)
-    local determinant_to_collection = {}
+    local determinant_to_variant = {}
 
     for _, v in ipairs(c.variants) do
         assert(v.determinant, 'each variant should have a determinant')
@@ -375,59 +379,62 @@ local convert_union_connection = function(state, c, collection_name)
             ('destination_type (named %s) must not be nil'):format(
             v.destination_collection))
 
-        determinant_to_collection[v.determinant] = v.destination_collection
+        determinant_to_variant[v.determinant] = v
+
+        local v_args
+        if c.type == '1:1' then
+            v_args = state.object_arguments[v.destination_collection]
+        elseif c.type == '1:N' then
+            destination_type = types.nonNull(types.list(destination_type))
+            v_args = state.all_arguments[v.destination_collection]
+        end
+
+        local v_list_args = state.list_arguments[v.destination_collection]
+
         union_types[#union_types + 1] = destination_type
 
-
-        --local v_args
-        --if c.type == '1:1' then
-        --    v_args = state.object_arguments[v.destination_collection]
-        --elseif c.type == '1:N' then
-        --    destination_type = types.nonNull(types.list(destination_type))
-        --    v_args = state.all_arguments[v.destination_collection]
-        --end
-        --
-        --local v_list_args = state.list_arguments[v.destination_collection]
-        --
-        union_types[#union_types + 1] = destination_type
-        --
-        --union_arguments[v.destination_collection] = v_args
-        --union_list_arguments[v.destination_collection] = v_list_args
-        --
-        --print(union_arguments)
-        --print(union_list_arguments)
+        collection_to_arguments[v.destination_collection] = v_args
+        collection_to_list_arguments[v.destination_collection] = v_list_args
     end
 
-    --@todo check what this function should return - a type or just a name of type
     -- should return graphQL type (collection in our terms)
     local function resolveType(result)
-        assert(utils.do_have_keys(result, determinant_keys), ('union parent' ..
-            'does not have fields that are nessesary to determine which' ..
-            'collection should be taken to resolve union type' ..
-            'union parent "%s" determinant keys "%s"'):
-            format(json.encode(result), json.encode(determinant_keys)))
+        --@todo fix this as it will work only for human-starship union
+        if utils.do_have_keys(result, {'name'}) then
+            return state.types['human_collection']
+        end
 
-        local resultingCollection
-        for determinant, collection in pairs(determinant_to_collection) do
+        if utils.do_have_keys(result, {'model'}) then
+            return state.types['starship_collection']
+        end
+    end
+
+    local function resolve_variant(parent)
+        assert(utils.do_have_keys(parent, determinant_keys),
+            ('Parent object of union object doesn\'t have determinant fields' ..
+                'which are nessesary to determine which resolving variant should' ..
+                'be used. Union parent object:\n"%s"\n Determinant keys:\n"%s"'):
+            format(yaml.encode(parent), yaml.encode(determinant_keys)))
+
+        local resulting_variant
+        for determinant, variant in pairs(determinant_to_variant) do
             local is_match = true
             for determinant_key, determinant_value in pairs(determinant) do
-                if result[determinant_key] ~= determinant_value then
+                if parent[determinant_key] ~= determinant_value then
                     is_match = false
                     break
                 end
             end
 
             if is_match then
-                resultingCollection = state.types[collection]
+                resulting_variant = variant
                 break
             end
         end
 
-        --@todo fix this message with pl.pretty.dump
-        assert(resultingCollection, ('resolveType failed to resolve type' ..
-            'of Union connection. Parent object: "%s" \n' ..
-            'Determinant_to_collection map:'):format(json.encode(result)))
-        return resultingCollection
+        assert(resulting_variant, ('Variant resolving failed.'..
+            'Parent object: "%s"\n'):format(yaml.encode(parent)))
+        return resulting_variant
     end
 
     local field = {
@@ -435,101 +442,70 @@ local convert_union_connection = function(state, c, collection_name)
         kind = types.union({name = c.name, types = union_types, resolveType = resolveType}),
         arguments =  nil,
         resolve = function(parent, args_instance, info)
-            --@todo maybe something should be added to this resolve function
-            return parent
-        end,
-            ---
-        --    local determinant_key = utils.get_keys(c.variants[1].determinant)[1]
-        --
-        --    local actual_variant
-        --    for _, v in pairs(c.variants) do
-        --        if v.determinant[determinant_key] == parent[determinant_key] then
-        --            actual_variant = v
-        --        end
-        --    end
-        --
-        --    --@todo add assert for determinant key exsistence in parent object
-        --    assert(actual_variant ~= nil, 'there is no match between' ..
-        --    'actual determinant value in object' .. json.encode(parent) ..
-        --    'and list of possible determinants in ' .. json.encode(c.variants))
-        --
-        --    local destination_collection = actual_variant.destination_collection
-        --
-        --    print('print from 439 in tarantool - destination collection')
-        --    print(destination_collection)
-        --
-        --    local destination_args_names = {}
-        --    local destination_args_values = {}
-        --
-        --    for _, part in ipairs(actual_variant.parts) do
-        --        assert(type(part.source_field) == 'string',
-        --        'part.source_field must be a string, got ' ..
-        --        type(part.destination_field))
-        --        assert(type(part.destination_field) == 'string',
-        --        'part.destination_field must be a string, got ' ..
-        --        type(part.destination_field))
-        --
-        --        destination_args_names[#destination_args_names + 1] =
-        --        part.destination_field
-        --        destination_args_values[#destination_args_values + 1] =
-        --        parent[part.source_field]
-        --    end
-        --
-        --    local from = {
-        --        collection_name = collection_name,
-        --        connection_name = c.name,
-        --        destination_args_names = destination_args_names,
-        --        destination_args_values = destination_args_values,
-        --    }
-        --    local extra = {
-        --        qcontext = info.qcontext
-        --    }
-        --
-        --
-        --    --local c_args = union_arguments
-        --    --local c_list_args = union_list_arguments
-        --
-        --    local c_args = union_arguments[destination_collection]
-        --    local c_list_args = union_list_arguments[destination_collection]
-        --
-        --    print('print from 460 - c_args and c_list_args from union connection determined')
-        --    require('pl.pretty').dump(c_args)
-        --    print('c_list_args')
-        --    require('pl.pretty').dump(c_list_args)
-        --
-        --
-        --
-        --    local object_args_instance = {} -- passed to 'filter'
-        --    local list_args_instance = {} -- passed to 'args'
-        --    for k, v in pairs(args_instance) do
-        --        if c_list_args[k] ~= nil then
-        --            list_args_instance[k] = v
-        --        elseif c_args[k] ~= nil then
-        --            object_args_instance[k] = v
-        --        else
-        --            error(('cannot found "%s" field ("%s" value) ' ..
-        --            'within allowed fields'):format(tostring(k),
-        --            tostring(v)))
-        --        end
-        --    end
-        --    local objs = state.accessor:select(parent,
-        --    actual_variant.destination_collection, from,
-        --    object_args_instance, list_args_instance, extra)
-        --    assert(type(objs) == 'table',
-        --    'objs list received from an accessor ' ..
-        --    'must be a table, got ' .. type(objs))
-        --    if c.type == '1:1' then
-        --        assert(#objs == 1,
-        --        'expect one matching object, got ' ..
-        --        tostring(#objs))
-        --        return objs[1]
-        --    else -- c.type == '1:N'
-        --        return objs
-        --    end
-        --end,
-    }
+            --variant for this destination
+            local v = resolve_variant(parent)
+            local destination_collection = state.types[v.destination_collection]
+            local destination_args_names = {}
+            local destination_args_values = {}
+
+            for _, part in ipairs(v.parts) do
+                assert(type(part.source_field) == 'string',
+                    'part.source_field must be a string, got ' ..
+                        type(part.destination_field))
+                assert(type(part.destination_field) == 'string',
+                    'part.destination_field must be a string, got ' ..
+                        type(part.destination_field))
+
+                destination_args_names[#destination_args_names + 1] =
+                part.destination_field
+                destination_args_values[#destination_args_values + 1] =
+                parent[part.source_field]
+            end
+
+            local from = {
+                collection_name = collection_name,
+                connection_name = c.name,
+                destination_args_names = destination_args_names,
+                destination_args_values = destination_args_values,
+            }
+            local extra = {
+                qcontext = info.qcontext
+            }
+            local object_args_instance = {} -- passed to 'filter'
+            local list_args_instance = {} -- passed to 'args'
+
+            local c_args = collection_to_arguments[destination_collection]
+            local c_list_args = collection_to_list_arguments[destination_collection]
+
+            for k, v in pairs(args_instance) do
+                if c_list_args[k] ~= nil then
+                    list_args_instance[k] = v
+                elseif c_args[k] ~= nil then
+                    object_args_instance[k] = v
+                else
+                    error(('cannot found "%s" field ("%s" value) ' ..
+                        'within allowed fields'):format(tostring(k),
+                        tostring(v)))
+                end
+            end
+                local objs = state.accessor:select(parent,
+                    v.destination_collection, from,
+                    object_args_instance, list_args_instance, extra)
+                assert(type(objs) == 'table',
+                    'objs list received from an accessor ' ..
+                        'must be a table, got ' .. type(objs))
+                if c.type == '1:1' then
+                    assert(#objs == 1,
+                        'expect one matching object, got ' ..
+                            tostring(#objs))
+                    return objs[1]
+                else -- c.type == '1:N'
+                    return objs
+                end
+        end
+        }
     return field
-end
+    end
 
 --- The function converts passed connection to a field of GraphQL type
 ---
@@ -708,8 +684,6 @@ local function parse_cfg(cfg)
             accessor:list_args(collection_name))
 
         local args = utils.merge_tables(object_args, list_args)
-        --print('curr collection is ' ..collection_name)
-        --require('pl.pretty').dump(args)
 
         state.object_arguments[collection_name] = object_args
         state.list_arguments[collection_name] = list_args
@@ -738,8 +712,10 @@ local function parse_cfg(cfg)
                 local extra = {
                     qcontext = info.qcontext
                 }
+
+
                 return accessor:select(rootValue, collection_name, from,
-                    object_args_instance, list_args_instance, extra)
+                        object_args_instance, list_args_instance, extra)
             end,
         }
     end
