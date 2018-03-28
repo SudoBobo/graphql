@@ -168,9 +168,9 @@ function union_testdata.fill_test_data(shard)
     local shard = shard or box.space
 
     shard.hero_collection:replace(
-        { 1827767717, 'hero_id_1', 'human'})
+        { 1827767717, 'hero_id_1', 'human', 'Falcon-42'})
     shard.hero_collection:replace(
-        { 1827767717, 'hero_id_2', 'starship'})
+        { 1827767717, 'hero_id_2', 'starship', 'X-Wing'})
 
     shard.human_collection:replace(
         { 1827767717, 'hero_id_1', 'Luke', "EMPR"})

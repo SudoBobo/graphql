@@ -518,9 +518,10 @@ local function convert_union_connection(state, connection, collection_name)
             ('destination_type (named %s) must not be nil'):format(
                 v.destination_collection))
 
+        local type = c.type or v.type
         local v_args = args_from_destination_collection(state,
-            v.destination_collection, c.type)
-        destination_type = specify_destination_type(destination_type, c.type)
+            v.destination_collection, type)
+        destination_type = specify_destination_type(destination_type, type)
 
         local v_list_args = state.list_arguments[v.destination_collection]
 
@@ -566,6 +567,7 @@ local function convert_union_connection(state, connection, collection_name)
         arguments = nil, -- see Border cases/Unions at the top of the file
         resolve = function(parent, args_instance, info)
             local v, variant_num = resolve_variant(parent)
+            local type = v.type or c.type
             local destination_type = union_types[variant_num]
             local destination_collection =
                 state.nullable_collection_types[v.destination_collection]
@@ -579,15 +581,15 @@ local function convert_union_connection(state, connection, collection_name)
             --   source collection is the Query pseudo-collection).
             if collection_name ~= 'Query' and are_all_parts_null(parent, v.parts)
                 then
-                    if c.type ~= '1:1*' and c.type ~= '1:N' then
+                    if type ~= '1:1*' and type ~= '1:N' then
                         -- `if` is to avoid extra json.encode
-                        assert(c.type == '1:1*' or c.type == '1:N',
+                        assert(type == '1:1*' or type == '1:N',
                             ('only 1:1* or 1:N connections can have ' ..
                             'all key parts null; parent is %s from ' ..
                             'collection "%s"'):format(json.encode(parent),
                                 tostring(collection_name)))
                     end
-                    return c.type == '1:N' and {} or nil, destination_type
+                    return type == '1:N' and {} or nil, destination_type
             end
 
             local from = {
@@ -615,14 +617,14 @@ local function convert_union_connection(state, connection, collection_name)
             assert(type(objs) == 'table',
                 'objs list received from an accessor ' ..
                 'must be a table, got ' .. type(objs))
-            if c.type == '1:1' or c.type == '1:1*' then
+            if type == '1:1' or type == '1:1*' then
                 -- we expect here exactly one object even for 1:1*
                 -- connections because we processed all-parts-are-null
                 -- situation above
                 assert(#objs == 1, 'expect one matching object, got ' ..
                     tostring(#objs))
                 return objs[1], destination_type
-            else -- c.type == '1:N'
+            else -- type == '1:N'
                 return objs, destination_type
             end
         end
@@ -640,11 +642,12 @@ end
 --- @treturn table simple and union connection depending on the type of
 --- input connection
 local convert_connection_to_field = function(state, connection, collection_name)
-    assert(type(connection.type) == 'string',
-        'connection.type must be a string, got ' .. type(connection.type))
-    assert(connection.type == '1:1' or connection.type == '1:1*' or
-        connection.type == '1:N', 'connection.type must be 1:1, 1:1* or 1:N, '..
-        'got ' .. connection.type)
+    --todo place here some construction to handle all cases (old type format and new type format)
+    --assert(type(connection.type) == 'string',
+    --    'connection.type must be a string, got ' .. type(connection.type))
+    --assert(connection.type == '1:1' or connection.type == '1:1*' or
+    --    connection.type == '1:N', 'connection.type must be 1:1, 1:1* or 1:N, '..
+    --    'got ' .. connection.type)
     assert(type(connection.name) == 'string',
         'connection.name must be a string, got ' .. type(connection.name))
     assert(connection.destination_collection or connection.variants,

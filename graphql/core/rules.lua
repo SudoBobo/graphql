@@ -328,7 +328,7 @@ function rules.fragmentSpreadIsPossible(node, context)
     -- conditional fragment expression is type of some field of parent object.
     -- In case of Union parent object and NonNull wrapped inner types
     -- graphql-lua missed unwrapping so we add it here
-    while kind.__type == 'NonNull' do
+    while kind.__type == 'NonNull' or kind.__type == 'List' do
       kind = kind.ofType
     end
     return fragmentTypes[kind]
