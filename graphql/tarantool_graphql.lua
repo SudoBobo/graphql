@@ -374,6 +374,113 @@ local function separate_args_instance(args_instance, connection_args,
     return object_args_instance, list_args_instance
 end
 
+local function invoke_resolve(prepared_resolve)
+    if prepared_resolve.is_calculated then
+        return prepared_resolve.objs
+    end
+
+    local prepared_select = prepared_resolve.prepared_select
+    local opts = prepared_resolve.opts
+    local state = prepared_resolve.state
+    local c = prepared_resolve.connection
+
+    local dont_force_nullability = opts.dont_force_nullability
+
+    local objs = state.accessor:invoke_select(prepared_select)
+    assert(type(objs) == 'table',
+        'objs list received from an accessor ' ..
+        'must be a table, got ' .. type(objs))
+    if c.type == '1:1' or c.type == '1:1*' then
+        -- we expect here exactly one object even for 1:1*
+        -- connections because we processed all-parts-are-null
+        -- situation above
+        assert(#objs == 1 or dont_force_nullability,
+            'expect one matching object, got ' ..
+            tostring(#objs))
+        return objs[1]
+    else -- c.type == '1:N'
+        return objs
+    end
+end
+
+--- XXX
+local function gen_prepare_resolve(state, collection_name, connection, opts)
+    local genResolveField = opts.genResolveField
+    local c_args = opts.c_args
+    local c_list_args = opts.c_list_args
+    local c = connection
+
+    return function(parent, args_instance, info, opts)
+        local opts = opts or {}
+        assert(type(opts) == 'table',
+            'opts must be nil or a table, got ' .. type(opts))
+        local dont_force_nullability =
+            opts.dont_force_nullability or false
+        assert(type(dont_force_nullability) == 'boolean',
+            'opts.dont_force_nullability ' ..
+            'must be nil or a boolean, got ' ..
+            type(dont_force_nullability))
+
+        local destination_args_names, destination_args_values =
+            parent_args_values(parent, c.parts)
+
+        -- Avoid non-needed index lookup on a destination
+        -- collection when all connection parts are null:
+        -- * return null for 1:1* connection;
+        -- * return {} for 1:N connection (except the case when
+        --   source collection is the Query pseudo-collection).
+        if collection_name ~= 'Query' and are_all_parts_null(parent, c.parts)
+            then
+                if c.type ~= '1:1*' and c.type ~= '1:N' then
+                    -- `if` is to avoid extra json.encode
+                    assert(c.type == '1:1*' or c.type == '1:N',
+                        ('only 1:1* or 1:N connections can have ' ..
+                        'all key parts null; parent is %s from ' ..
+                        'collection "%s"'):format(json.encode(parent),
+                            tostring(collection_name)))
+                end
+                local objs = c.type == '1:N' and {} or nil
+                return {
+                    is_calculated = true,
+                    objs = objs,
+                    invoke = function()
+                        return nil
+                    end,
+                }
+        end
+
+        local from = {
+            collection_name = collection_name,
+            connection_name = c.name,
+            destination_args_names = destination_args_names,
+            destination_args_values = destination_args_values,
+        }
+        local resolveField = genResolveField(info)
+        local extra = {
+            qcontext = info.qcontext,
+            resolveField = resolveField, -- for subrequests
+        }
+
+        -- object_args_instance will be passed to 'filter'
+        -- list_args_instance will be passed to 'args'
+        local object_args_instance, list_args_instance =
+            separate_args_instance(args_instance, c_args, c_list_args)
+
+        local prepared_select = state.accessor:prepare_select(parent,
+            c.destination_collection, from,
+            object_args_instance, list_args_instance, extra)
+        return {
+            is_calculated = false,
+            prepared_select = prepared_select,
+            opts = opts,
+            state = state,
+            connection = c,
+            invoke = invoke_resolve,
+        }
+    end
+end
+
+--- XXX
 --- The function converts passed simple connection to a field of GraphQL type.
 ---
 --- @tparam table state for read state.accessor and previously filled
@@ -420,6 +527,12 @@ local function convert_simple_connection(state, connection, collection_name)
         end
     end
 
+    local prepare_resolve = gen_prepare_resolve(state, collection_name, c, {
+        genResolveField = genResolveField,
+        c_args = c_args,
+        c_list_args = c_list_args,
+    })
+
     local field = {
         name = c.name,
         kind = destination_type,
@@ -427,72 +540,11 @@ local function convert_simple_connection(state, connection, collection_name)
         -- captures c.{parts, name, destination_collection}, collection_name,
         -- genResolveField, c_args, c_list_args.
         resolve = function(parent, args_instance, info, opts)
-            local opts = opts or {}
-            assert(type(opts) == 'table',
-                'opts must be nil or a table, got ' .. type(opts))
-            local dont_force_nullability =
-                opts.dont_force_nullability or false
-            assert(type(dont_force_nullability) == 'boolean',
-                'opts.dont_force_nullability ' ..
-                'must be nil or a boolean, got ' ..
-                type(dont_force_nullability))
-
-            local destination_args_names, destination_args_values =
-                parent_args_values(parent, c.parts)
-
-            -- Avoid non-needed index lookup on a destination
-            -- collection when all connection parts are null:
-            -- * return null for 1:1* connection;
-            -- * return {} for 1:N connection (except the case when
-            --   source collection is the Query pseudo-collection).
-            if collection_name ~= 'Query' and are_all_parts_null(parent, c.parts)
-                then
-                    if c.type ~= '1:1*' and c.type ~= '1:N' then
-                        -- `if` is to avoid extra json.encode
-                        assert(c.type == '1:1*' or c.type == '1:N',
-                            ('only 1:1* or 1:N connections can have ' ..
-                            'all key parts null; parent is %s from ' ..
-                            'collection "%s"'):format(json.encode(parent),
-                                tostring(collection_name)))
-                    end
-                    return c.type == '1:N' and {} or nil
-            end
-
-            local from = {
-                collection_name = collection_name,
-                connection_name = c.name,
-                destination_args_names = destination_args_names,
-                destination_args_values = destination_args_values,
-            }
-            local resolveField = genResolveField(info)
-            local extra = {
-                qcontext = info.qcontext,
-                resolveField = resolveField, -- for subrequests
-            }
-
-            -- object_args_instance will be passed to 'filter'
-            -- list_args_instance will be passed to 'args'
-            local object_args_instance, list_args_instance =
-                separate_args_instance(args_instance, c_args, c_list_args)
-
-            local objs = state.accessor:select(parent,
-                c.destination_collection, from,
-                object_args_instance, list_args_instance, extra)
-            assert(type(objs) == 'table',
-                'objs list received from an accessor ' ..
-                'must be a table, got ' .. type(objs))
-            if c.type == '1:1' or c.type == '1:1*' then
-                -- we expect here exactly one object even for 1:1*
-                -- connections because we processed all-parts-are-null
-                -- situation above
-                assert(#objs == 1 or dont_force_nullability,
-                    'expect one matching object, got ' ..
-                    tostring(#objs))
-                return objs[1]
-            else -- c.type == '1:N'
-                return objs
-            end
+            local prepared_resolve = prepare_resolve(parent, args_instance,
+                info, opts)
+            return prepared_resolve:invoke()
         end,
+        prepare_resolve = prepare_resolve,
     }
 
     return field
@@ -1150,9 +1202,16 @@ end
 ---                 -- * `qcontext` (table) can be used by an accessor to store
 ---                 --   any query-related data;
 ---                 -- * `resolveField(field_name, object, filter, opts)`
----                 -- (function) for performing a subrequest on a fields
----                 -- connected using a 1:1 or 1:1* connection.
+---                 --   (function) for performing a subrequest on a fields
+---                 --   connected using a 1:1 or 1:1* connection.
 ---                 --
+---                 return ...
+---             end,
+---             prepare_select = function(self, parent, collection_name, from,
+---                     filter, args, extra)
+---                 ...
+---             end,
+---             invoke_select = function(self, prepared_select)
 ---                 return ...
 ---             end,
 ---             list_args = function(self, collection_name)

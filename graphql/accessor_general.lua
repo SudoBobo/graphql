@@ -887,8 +887,25 @@ local function process_tuple(state, tuple, opts)
     return true
 end
 
---- The function is core of this module and implements logic of fetching and
---- filtering requested objects.
+--- This function is called on first select related to a query. Its purpose is
+--- to initialize qcontext table.
+---
+--- @tparam table accessor
+--- @tparam table qcontext per-query table which stores query internal state;
+--- all neccessary initialization of this parameter should be performed by this
+--- function
+local function init_qcontext(accessor, qcontext)
+    local settings = accessor.settings
+    qcontext.statistics = {
+        resulting_object_cnt = 0,
+        fetched_object_cnt = 0
+    }
+    qcontext.deadline_clock = clock.monotonic64() +
+        settings.timeout_ms * 1000 * 1000
+end
+
+--- The function prepares context for tuples selection, postprocessing and
+--- filtering.
 ---
 --- @tparam table self the data accessor created by the `new` function
 --- (directly or indirectly using the `accessor_space.new` or the
@@ -908,8 +925,9 @@ end
 --- @tparam table extra table which contains extra information related to
 --- current select and the whole query
 ---
---- @treturn table list of matching objects
-local function select_internal(self, collection_name, from, filter, args, extra)
+--- @treturn table `res` with `request_opts`, `select_state`, `select_opts` and
+--- `args` fields
+local function prepare_select(self, collection_name, from, filter, args, extra)
     assert(type(self) == 'table',
         'self must be a table, got ' .. type(self))
     assert(type(collection_name) == 'string',
@@ -941,6 +959,12 @@ local function select_internal(self, collection_name, from, filter, args, extra)
     assert(args.pcre == nil or type(args.pcre) == 'table',
         'args.pcre must be nil or a table, got ' .. type(args.pcre))
 
+    -- qcontext initialization
+    if extra.qcontext.initialized ~= true then
+        init_qcontext(self, extra.qcontext)
+        extra.qcontext.initialized = true
+    end
+
     local collection = self.collections[collection_name]
     assert(collection ~= nil,
         ('cannot find the collection "%s"'):format(
@@ -960,7 +984,7 @@ local function select_internal(self, collection_name, from, filter, args, extra)
             index_name, collection_name))
     end
 
-    -- lookup functions for unflattening
+    -- lookup function for unflattening
     local schema_name = collection.schema_name
     assert(type(schema_name) == 'string',
         'schema_name must be a string, got ' .. type(schema_name))
@@ -993,18 +1017,15 @@ local function select_internal(self, collection_name, from, filter, args, extra)
         resolveField = extra.resolveField,
     }
 
+    local iterator_opts = nil
+
     if index == nil then
-        -- fullscan
-        local primary_index = self.funcs.get_primary_index(collection_name)
-        for _, tuple in primary_index:pairs() do
-            assert(pivot == nil,
-                'offset for top-level objects must use a primary index')
-            local continue = process_tuple(select_state, tuple, select_opts)
-            if not continue then break end
-        end
+        assert(pivot == nil,
+            'offset for top-level objects must use a primary index')
+        index = self.funcs.get_primary_index(collection_name)
+        index_value = nil
     else
-        -- select by index
-        local iterator_opts = {}
+        iterator_opts = iterator_opts or {}
         if pivot ~= nil then
             -- handle case when there is pivot item (offset was passed)
             if pivot.value_list ~= nil then
@@ -1034,23 +1055,51 @@ local function select_internal(self, collection_name, from, filter, args, extra)
         if full_match and args.limit ~= nil then
             iterator_opts.limit = args.limit
         end
-
-        for _, tuple in index:pairs(index_value, iterator_opts) do
-            local continue = process_tuple(select_state, tuple, select_opts)
-            if not continue then break end
-        end
     end
 
-    local count = select_state.count
-    local objs = select_state.objs
+    -- request options can be changed below
+    local request_opts = {
+        index = index,
+        index_value = index_value,
+        iterator_opts = iterator_opts,
+    }
 
-    assert(args.limit == nil or count <= args.limit,
-        ('count[%d] exceeds limit[%s] (before return)'):format(
-        count, args.limit))
-    assert(#objs == count,
-        ('count[%d] is not equal to objs count[%d]'):format(count, #objs))
+    return {
+        request_opts = request_opts,
+        select_state = select_state,
+        select_opts = select_opts,
+        args = args,
+    }
+end
 
-    return objs
+--- XXX
+local function invoke_select(prepared_select)
+      local request_opts = prepared_select.request_opts
+      local select_state = prepared_select.select_state
+      local select_opts = prepared_select.select_opts
+      local args = prepared_select.args
+
+      local index = request_opts.index
+      local index_value = request_opts.index_value
+      local iterator_opts = request_opts.iterator_opts
+
+      for _, tuple in index:pairs(index_value, iterator_opts) do
+          local continue = process_tuple(select_state, tuple,
+              select_opts)
+          if not continue then break end
+      end
+
+      local count = select_state.count
+      local objs = select_state.objs
+
+      assert(args.limit == nil or count <= args.limit,
+          ('count[%d] exceeds limit[%s] (before return)'):format(
+          count, args.limit))
+      assert(#objs == count,
+          ('count[%d] is not equal to objs count[%d]'):format(
+          count, #objs))
+
+      return objs
 end
 
 --- Set of asserts to check the `funcs` argument of the @{accessor_general.new}
@@ -1073,22 +1122,6 @@ local function validate_funcs(funcs)
     assert(type(funcs.unflatten_tuple) == 'function',
         'funcs.unflatten_tuple must be a function, got ' ..
         type(funcs.unflatten_tuple))
-end
-
---- This function is called on first select related to a query. Its purpose is
---- to initialize qcontext table.
---- @tparam table accessor
---- @tparam table qcontext per-query table which stores query internal state;
---- all neccessary initialization of this parameter should be performed by this
---  function
-local function init_qcontext(accessor, qcontext)
-    local settings = accessor.settings
-    qcontext.statistics = {
-        resulting_object_cnt = 0,
-        fetched_object_cnt = 0
-    }
-    qcontext.deadline_clock = clock.monotonic64() +
-        settings.timeout_ms * 1000 * 1000
 end
 
 --- Get an avro-schema for a primary key by a collection name.
@@ -1238,9 +1271,8 @@ end
 ---         ...
 ---     }
 ---
---- @treturn table data accessor instance, a table with the two methods
---- (`select` and `arguments`) as described in the @{tarantool_graphql.new}
---- function description.
+--- @treturn table data accessor instance, a table with the methods as
+--- described in the @{tarantool_graphql.new} function description.
 function accessor_general.new(opts, funcs)
     assert(type(opts) == 'table',
         'opts must be a table, got ' .. type(opts))
@@ -1317,25 +1349,17 @@ function accessor_general.new(opts, funcs)
         __index = {
             select = function(self, parent, collection_name, from,
                     filter, args, extra)
-                assert(type(parent) == 'table',
-                    'parent must be a table, got ' .. type(parent))
-                assert(from == nil or type(from) == 'table',
-                    'from must be nil or a string, got ' .. type(from))
-                assert(from == nil or type(from.collection_name) == 'string',
-                    'from must be nil or from.collection_name ' ..
-                    'must be a string, got ' ..
-                    type((from or {}).collection_name))
-                assert(from == nil or type(from.connection_name) == 'string',
-                    'from must be nil or from.connection_name ' ..
-                    'must be a string, got ' ..
-                    type((from or {}).connection_name))
-                --`qcontext` initialization
-                if extra.qcontext.initialized ~= true then
-                    init_qcontext(self, extra.qcontext)
-                    extra.qcontext.initialized = true
-                end
-                return select_internal(self, collection_name, from, filter,
+                local prepared_select = prepare_select(self, collection_name,
+                    from, filter, args, extra)
+                return invoke_select(prepared_select)
+            end,
+            prepare_select = function(self, parent, collection_name, from,
+                        filter, args, extra)
+                return prepare_select(self, collection_name, from, filter,
                     args, extra)
+            end,
+            invoke_select = function(self, prepared_select)
+                return invoke_select(prepared_select)
             end,
             list_args = function(self, collection_name)
                 local offset_type = get_primary_key_type(self, collection_name)
