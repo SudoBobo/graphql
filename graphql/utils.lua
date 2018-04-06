@@ -204,4 +204,14 @@ function utils.table_size(t)
     return count
 end
 
+--- Append all elements of the list `tail` to the end of list `list`.
+---
+--- @tparam table list list to add elements to
+--- @tparam table tail list to add elements from
+function utils.expand_list(list, tail)
+    for _, item in ipairs(tail) do
+        table.insert(list, item)
+    end
+end
+
 return utils

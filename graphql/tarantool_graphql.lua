@@ -39,7 +39,7 @@ local parse = require('graphql.core.parse')
 local schema = require('graphql.core.schema')
 local types = require('graphql.core.types')
 local validate = require('graphql.core.validate')
-local execute = require('graphql.core.execute')
+local execute = require('graphql.execute')
 local query_to_avro = require('graphql.query_to_avro')
 local simple_config = require('graphql.simple_config')
 local config_complement = require('graphql.config_complement')
@@ -1050,13 +1050,11 @@ local function gql_execute(qstate, variables)
     assert(type(variables) == 'table', 'variables must be table, got ' ..
         type(variables))
 
-    local root_value = {}
     local operation_name = qstate.operation_name
     assert(type(operation_name) == 'string',
         'operation_name must be a string, got ' .. type(operation_name))
 
-    return execute(state.schema, qstate.ast, root_value, variables,
-        operation_name)
+    return execute.execute(state.schema, qstate.ast, variables, operation_name)
 end
 
 --- The function parses a query string, validate the resulting query
