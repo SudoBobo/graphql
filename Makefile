@@ -1,3 +1,10 @@
+WWW_BROWSER=xdg-open
+REALPATH=$(shell \
+	{ type readlink >/dev/null 2>&1 && echo "readlink -f"; } || \
+	{ type realpath >/dev/null 2>&1 && echo "realpath"; } || \
+	echo "echo" \
+)
+
 default:
 	false
 
@@ -45,3 +52,7 @@ apidoc:
 	ldoc -d doc/apidoc graphql --all -f markdown
 	# fix navigation panel width
 	sed -i -e 's/: 14em;/: 24em;/' doc/apidoc/ldoc.css
+
+.PHONY: serve-apidoc
+serve-apidoc: apidoc
+	$(WWW_BROWSER) "$$($(REALPATH) ./doc/apidoc/index.html)"
