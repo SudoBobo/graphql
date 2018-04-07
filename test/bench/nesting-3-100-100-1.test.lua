@@ -9,6 +9,7 @@ local fio = require('fio')
 package.path = fio.abspath(debug.getinfo(1).source:match("@?(.*/)")
     :gsub('/./', '/'):gsub('/+$', '')) .. '/../../?.lua' .. ';' .. package.path
 
+local utils = require('test.utils')
 local bench = require('test.bench.bench')
 local testdata = require('test.testdata.bench_testdata')
 
@@ -18,7 +19,7 @@ local testdata = require('test.testdata.bench_testdata')
 local function bench_prepare(state)
     local virtbox = state.shard or box.space
 
-    state.gql_wrapper = bench.graphql_from_testdata(testdata, state.shard)
+    state.gql_wrapper = utils.graphql_from_testdata(testdata, state.shard)
     testdata.fill_test_data(virtbox)
 
     local query = [[

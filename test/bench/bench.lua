@@ -13,7 +13,6 @@ local clock = require('clock')
 local fiber = require('fiber')
 local digest = require('digest')
 local multirunner = require('test.common.lua.multirunner')
-local graphql = require('graphql')
 local utils = require('graphql.utils')
 local test_run = utils.optional_require('test_run')
 test_run = test_run and test_run.new()
@@ -28,29 +27,6 @@ local SCRIPT_DIR = fio.abspath(debug.getinfo(1).source:match("@?(.*/)")
 -- ------
 
 local bench = {}
-
-function bench.graphql_from_testdata(testdata, shard)
-    local accessor_class = shard and graphql.accessor_shard or
-        graphql.accessor_space
-
-    local meta = testdata.get_test_metadata()
-
-    local accessor = accessor_class.new({
-        schemas = meta.schemas,
-        collections = meta.collections,
-        service_fields = meta.service_fields,
-        indexes = meta.indexes,
-        timeout_ms = graphql.TIMEOUT_INFINITY,
-    })
-
-    local gql_wrapper = graphql.new({
-        schemas = meta.schemas,
-        collections = meta.collections,
-        accessor = accessor,
-    })
-
-    return gql_wrapper
-end
 
 local function workload(shard, bench_prepare, bench_iter, opts)
     local iterations = opts.iterations
